@@ -1,0 +1,381 @@
+id: 09_aws_taxi_scheduled
+namespace: zoomcamp
+description: |
+  Best to add a label `backfill:true` from the UI to track executions created via a backfill.
+  CSV data used in the course: https://github.com/DataTalksClub/nyc-tlc-data/releases
+
+inputs:
+  - id: taxi
+    type: SELECT
+    displayName: Select taxi type
+    values: [yellow, green]
+    defaults: green
+
+variables:
+  file: "{{ inputs.taxi }}_tripdata_{{ trigger.date | date('yyyy-MM') }}.csv"
+  s3_file: "s3://kestra-zoomcamp-ny-taxi-mtl9999999999988888/{{ vars.file }}"
+  table_suffix: "{{ trigger.date | date('yyyy_MM') }}"
+  download_url: "https://github.com/DataTalksClub/nyc-tlc-data/releases/download/{{ inputs.taxi }}/{{ vars.file }}.gz"
+
+tasks:
+  - id: set_label
+    type: io.kestra.plugin.core.execution.Labels
+    labels:
+      file: "{{ inputs.taxi }}_tripdata_{{ trigger.date | date('yyyy-MM') }}.csv"
+      taxi: "{{ inputs.taxi }}"
+
+  - id: extract
+    type: io.kestra.plugin.scripts.shell.Commands
+    outputFiles:
+      - "output.csv"
+    taskRunner:
+      type: io.kestra.plugin.core.runner.Process
+    commands:
+      - 'wget -qO- "{{ render(vars.download_url) }}" | gunzip > output.csv'
+
+  - id: upload_to_s3
+    type: io.kestra.plugin.aws.s3.Upload
+    from: "{{ outputs.extract.outputFiles['output.csv'] }}"
+    key: "{{ render(vars.file) }}"
+    bucket: "kestra-zoomcamp-ny-taxi-mtl9999999999988888"
+
+  - id: if_green_taxi
+    type: io.kestra.plugin.core.flow.If
+    condition: "{{ inputs.taxi == 'green' }}"
+    then:
+      - id: redshift_green_create_table
+        type: io.kestra.plugin.jdbc.redshift.Query
+        sql: |
+          CREATE TABLE IF NOT EXISTS green_tripdata (
+              unique_row_id VARCHAR(32),
+              filename VARCHAR(255),
+              vendorid INTEGER,
+              lpep_pickup_datetime TIMESTAMP,
+              lpep_dropoff_datetime TIMESTAMP,
+              store_and_fwd_flag VARCHAR(1),
+              ratecodeid INTEGER,
+              pulocationid INTEGER,
+              dolocationid INTEGER,
+              passenger_count INTEGER,
+              trip_distance DOUBLE PRECISION,
+              fare_amount DOUBLE PRECISION,
+              extra DOUBLE PRECISION,
+              mta_tax DOUBLE PRECISION,
+              tip_amount DOUBLE PRECISION,
+              tolls_amount DOUBLE PRECISION,
+              ehail_fee DOUBLE PRECISION,
+              improvement_surcharge DOUBLE PRECISION,
+              total_amount DOUBLE PRECISION,
+              payment_type INTEGER,
+              trip_type INTEGER,
+              congestion_surcharge DOUBLE PRECISION
+          );
+
+      - id: redshift_green_create_stage
+        type: io.kestra.plugin.jdbc.redshift.Query
+        sql: |
+          CREATE TABLE IF NOT EXISTS stage_green_tripdata (
+              vendorid INTEGER,
+              lpep_pickup_datetime TIMESTAMP,
+              lpep_dropoff_datetime TIMESTAMP,
+              store_and_fwd_flag VARCHAR(1),
+              ratecodeid INTEGER,
+              pulocationid INTEGER,
+              dolocationid INTEGER,
+              passenger_count INTEGER,
+              trip_distance DOUBLE PRECISION,
+              fare_amount DOUBLE PRECISION,
+              extra DOUBLE PRECISION,
+              mta_tax DOUBLE PRECISION,
+              tip_amount DOUBLE PRECISION,
+              tolls_amount DOUBLE PRECISION,
+              ehail_fee DOUBLE PRECISION,
+              improvement_surcharge DOUBLE PRECISION,
+              total_amount DOUBLE PRECISION,
+              payment_type INTEGER,
+              trip_type INTEGER,
+              congestion_surcharge DOUBLE PRECISION
+          );  
+      - id: redshift_green_truncate_stage
+        type: io.kestra.plugin.jdbc.redshift.Query
+        sql: |
+          TRUNCATE TABLE stage_green_tripdata;
+      - id: redshift_green_copy
+        type: io.kestra.plugin.jdbc.redshift.Query
+        sql: |
+          COPY stage_green_tripdata
+          FROM '{{ render(vars.s3_file) }}'
+          IAM_ROLE '{{ secret("REDSHIFT_IAM_ROLE_ARN") }}'
+          CSV
+          IGNOREHEADER 1; 
+
+          COPY stage_green_tripdata
+          FROM '{{ render(vars.s3_file) }}'
+          IAM_ROLE '{{ secret("REDSHIFT_IAM_ROLE_ARN") }}'
+          CSV
+          IGNOREHEADER 1;
+
+          COPY stage_green_tripdata
+          FROM '{{ render(vars.s3_file) }}'
+          IAM_ROLE '{{ secret("REDSHIFT_IAM_ROLE_ARN") }}'
+          CSV
+          IGNOREHEADER 1;
+
+      - id: redshift_green_merge
+        type: io.kestra.plugin.jdbc.redshift.Query
+        sql: |
+          MERGE INTO green_tripdata AS t
+          USING (
+              SELECT
+                  MD5(
+                      COALESCE(CAST(vendorid AS VARCHAR), '') ||
+                      COALESCE(CAST(lpep_pickup_datetime AS VARCHAR), '') ||
+                      COALESCE(CAST(lpep_dropoff_datetime AS VARCHAR), '') ||
+                      COALESCE(CAST(pulocationid AS VARCHAR), '') ||
+                      COALESCE(CAST(dolocationid AS VARCHAR), '') ||
+                      COALESCE(CAST(fare_amount AS VARCHAR), '') ||
+                      COALESCE(CAST(trip_distance AS VARCHAR), '')
+                  ) AS unique_row_id,
+                  '{{ vars.file }}' AS filename,
+                  vendorid,
+                  lpep_pickup_datetime,
+                  lpep_dropoff_datetime,
+                  store_and_fwd_flag,
+                  ratecodeid,
+                  pulocationid,
+                  dolocationid,
+                  passenger_count,
+                  trip_distance,
+                  fare_amount,
+                  extra,
+                  mta_tax,
+                  tip_amount,
+                  tolls_amount,
+                  ehail_fee,
+                  improvement_surcharge,
+                  total_amount,
+                  payment_type,
+                  trip_type,
+                  congestion_surcharge
+              FROM stage_green_tripdata
+          ) AS s
+          ON t.unique_row_id = s.unique_row_id
+          WHEN NOT MATCHED THEN
+            INSERT (
+                unique_row_id,
+                filename,
+                vendorid,
+                lpep_pickup_datetime,
+                lpep_dropoff_datetime,
+                store_and_fwd_flag,
+                ratecodeid,
+                pulocationid,
+                dolocationid,
+                passenger_count,
+                trip_distance,
+                fare_amount,
+                extra,
+                mta_tax,
+                tip_amount,
+                tolls_amount,
+                ehail_fee,
+                improvement_surcharge,
+                total_amount,
+                payment_type,
+                trip_type,
+                congestion_surcharge
+            )
+            VALUES (
+                s.unique_row_id,
+                s.filename,
+                s.vendorid,
+                s.lpep_pickup_datetime,
+                s.lpep_dropoff_datetime,
+                s.store_and_fwd_flag,
+                s.ratecodeid,
+                s.pulocationid,
+                s.dolocationid,
+                s.passenger_count,
+                s.trip_distance,
+                s.fare_amount,
+                s.extra,
+                s.mta_tax,
+                s.tip_amount,
+                s.tolls_amount,
+                s.ehail_fee,
+                s.improvement_surcharge,
+                s.total_amount,
+                s.payment_type,
+                s.trip_type,
+                s.congestion_surcharge
+            );
+
+  - id: if_yellow_taxi
+    type: io.kestra.plugin.core.flow.If
+    condition: "{{ inputs.taxi == 'yellow' }}"
+    then:
+      - id: redshift_yellow_create_table
+        type: io.kestra.plugin.jdbc.redshift.Query
+        sql: |
+          CREATE TABLE IF NOT EXISTS yellow_tripdata (
+              unique_row_id VARCHAR(32),
+              filename VARCHAR(255),
+              vendorid INTEGER,
+              tpep_pickup_datetime TIMESTAMP,
+              tpep_dropoff_datetime TIMESTAMP,
+              passenger_count INTEGER,
+              trip_distance DOUBLE PRECISION,
+              ratecodeid INTEGER,
+              store_and_fwd_flag VARCHAR(1),
+              pulocationid INTEGER,
+              dolocationid INTEGER,
+              payment_type INTEGER,
+              fare_amount DOUBLE PRECISION,
+              extra DOUBLE PRECISION,
+              mta_tax DOUBLE PRECISION,
+              tip_amount DOUBLE PRECISION,
+              tolls_amount DOUBLE PRECISION,
+              improvement_surcharge DOUBLE PRECISION,
+              total_amount DOUBLE PRECISION,
+              congestion_surcharge DOUBLE PRECISION
+          );
+
+      - id: redshift_yellow_create_stage
+        type: io.kestra.plugin.jdbc.redshift.Query
+        sql: |
+          CREATE TEMP TABLE stage_yellow_tripdata (
+              vendorid INTEGER,
+              tpep_pickup_datetime TIMESTAMP,
+              tpep_dropoff_datetime TIMESTAMP,
+              passenger_count INTEGER,
+              trip_distance DOUBLE PRECISION,
+              ratecodeid INTEGER,
+              store_and_fwd_flag VARCHAR(1),
+              pulocationid INTEGER,
+              dolocationid INTEGER,
+              payment_type INTEGER,
+              fare_amount DOUBLE PRECISION,
+              extra DOUBLE PRECISION,
+              mta_tax DOUBLE PRECISION,
+              tip_amount DOUBLE PRECISION,
+              tolls_amount DOUBLE PRECISION,
+              improvement_surcharge DOUBLE PRECISION,
+              total_amount DOUBLE PRECISION,
+              congestion_surcharge DOUBLE PRECISION
+          );
+
+      - id: redshift_yellow_copy
+        type: io.kestra.plugin.jdbc.redshift.Query
+        sql: |
+          COPY stage_yellow_tripdata
+          FROM '{{ vars.s3_file }}'
+          IAM_ROLE '{{ secret("REDSHIFT_IAM_ROLE_ARN") }}'
+          CSV
+          IGNOREHEADER 1;
+
+      - id: redshift_yellow_merge
+        type: io.kestra.plugin.jdbc.redshift.Query
+        sql: |
+          MERGE INTO yellow_tripdata AS t
+          USING (
+              SELECT
+                  MD5(
+                      COALESCE(CAST(vendorid AS VARCHAR), '') ||
+                      COALESCE(CAST(tpep_pickup_datetime AS VARCHAR), '') ||
+                      COALESCE(CAST(tpep_dropoff_datetime AS VARCHAR), '') ||
+                      COALESCE(CAST(pulocationid AS VARCHAR), '') ||
+                      COALESCE(CAST(dolocationid AS VARCHAR), '') ||
+                      COALESCE(CAST(fare_amount AS VARCHAR), '') ||
+                      COALESCE(CAST(trip_distance AS VARCHAR), '')
+                  ) AS unique_row_id,
+                  '{{ vars.file }}' AS filename,
+                  vendorid,
+                  tpep_pickup_datetime,
+                  tpep_dropoff_datetime,
+                  passenger_count,
+                  trip_distance,
+                  ratecodeid,
+                  store_and_fwd_flag,
+                  pulocationid,
+                  dolocationid,
+                  payment_type,
+                  fare_amount,
+                  extra,
+                  mta_tax,
+                  tip_amount,
+                  tolls_amount,
+                  improvement_surcharge,
+                  total_amount,
+                  congestion_surcharge
+              FROM stage_yellow_tripdata
+          ) AS s
+          ON t.unique_row_id = s.unique_row_id
+          WHEN NOT MATCHED THEN
+            INSERT (
+                unique_row_id,
+                filename,
+                vendorid,
+                tpep_pickup_datetime,
+                tpep_dropoff_datetime,
+                passenger_count,
+                trip_distance,
+                ratecodeid,
+                store_and_fwd_flag,
+                pulocationid,
+                dolocationid,
+                payment_type,
+                fare_amount,
+                extra,
+                mta_tax,
+                tip_amount,
+                tolls_amount,
+                improvement_surcharge,
+                total_amount,
+                congestion_surcharge
+            )
+            VALUES (
+                s.unique_row_id,
+                s.filename,
+                s.vendorid,
+                s.tpep_pickup_datetime,
+                s.tpep_dropoff_datetime,
+                s.passenger_count,
+                s.trip_distance,
+                s.ratecodeid,
+                s.store_and_fwd_flag,
+                s.pulocationid,
+                s.dolocationid,
+                s.payment_type,
+                s.fare_amount,
+                s.extra,
+                s.mta_tax,
+                s.tip_amount,
+                s.tolls_amount,
+                s.improvement_surcharge,
+                s.total_amount,
+                s.congestion_surcharge
+            );
+
+  - id: purge_files
+    type: io.kestra.plugin.core.storage.PurgeCurrentExecutionFiles
+    description: To avoid cluttering your storage, we will remove the downloaded files
+
+pluginDefaults:
+  - type: io.kestra.plugin.jdbc.redshift
+    values:
+      url: "{{ secret('REDSHIFT_JDBC_URL') }}"
+      username: "{{ secret('REDSHIFT_USERNAME') }}"
+      password: "{{ secret('REDSHIFT_PASSWORD') }}"
+
+triggers:
+  - id: green_schedule
+    type: io.kestra.plugin.core.trigger.Schedule
+    cron: "0 9 1 * *"
+    inputs:
+      taxi: green
+
+  - id: yellow_schedule
+    type: io.kestra.plugin.core.trigger.Schedule
+    cron: "0 10 1 * *"
+    inputs:
+      taxi: yellow

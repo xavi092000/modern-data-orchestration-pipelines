@@ -1,0 +1,77 @@
+id: etl_pipeline_1
+namespace: zoomcamp
+
+tasks:
+  - id: extract_orders
+    type: io.kestra.plugin.core.http.Download
+    uri: "https://huggingface.co/datasets/kestra/datasets/raw/main/csv/orders.csv"
+
+  - id: extract_products
+    type: io.kestra.plugin.core.http.Download
+    uri: "https://huggingface.co/datasets/kestra/datasets/raw/main/csv/products.csv"
+
+  - id: transform
+    type: io.kestra.plugin.scripts.python.Script
+    dependencies:
+      - pandas
+    inputFiles:
+      orders.csv: "{{ outputs.extract_orders.uri }}"
+      products.csv: "{{ outputs.extract_products.uri }}"
+    outputFiles:
+      - "product_summary.csv"
+    script: |
+      import pandas as pd
+
+      orders = pd.read_csv("orders.csv")
+      products = pd.read_csv("products.csv")
+
+      summary = orders.groupby("product_id").agg(
+          total_quantity_sold=("quantity", "sum"),
+          total_revenue=("total", "sum")
+      ).reset_index()
+
+      products_selected = products[["product_id", "product_name", "brand"]]
+
+      final_df = summary.merge(products_selected, on="product_id", how="left")
+
+      final_df = final_df[
+          [
+              "product_id",
+              "product_name",
+              "brand",
+              "total_quantity_sold",
+              "total_revenue",
+          ]
+      ]
+
+      final_df.to_csv("product_summary.csv", index=False)
+
+  - id: create_summary_table
+    type: io.kestra.plugin.jdbc.postgresql.Query
+    url: jdbc:postgresql://pgdatabase:5432/ny_taxi
+    username: root
+    password: root
+    sql: |
+      CREATE TABLE IF NOT EXISTS product_summary (
+        product_id INT,
+        product_name TEXT,
+        brand TEXT,
+        total_quantity_sold INT,
+        total_revenue FLOAT
+      );
+
+  - id: load_summary_to_db
+    type: io.kestra.plugin.jdbc.postgresql.CopyIn
+    url: jdbc:postgresql://pgdatabase:5432/ny_taxi
+    username: root
+    password: root
+    from: "{{ outputs.transform.outputFiles['product_summary.csv'] }}"
+    format: CSV
+    header: true
+    table: product_summary
+    columns:
+      - product_id
+      - product_name
+      - brand
+      - total_quantity_sold
+      - total_revenue
