@@ -1,152 +1,27 @@
-\# Modern Data Orchestration Pipelines
+# Data Orchestration Exercises with Kestra
 
+Learning workflows covering Python tasks, PostgreSQL taxi ingestion, and scheduled AWS S3 / Redshift ingestion.
 
+## Origin and contribution scope
 
-Production-style orchestration and ETL workflow project focused on scheduled data pipelines, cloud ingestion workflows, PostgreSQL orchestration, AWS-based processing, and modern analytics automation.
+The workflows use the `zoomcamp` namespace and reference DataTalksClub course data. They are **course-based exercises and adaptations**, not a claim of an original enterprise orchestration platform. See [Data Engineering Zoomcamp](https://github.com/DataTalksClub/data-engineering-zoomcamp).
 
+The public work includes AWS/Redshift workflow configuration, monthly schedules, staging tables, and SQL merge logic. The precise upstream-versus-personal line attribution has not been reconstructed; the published code is available for inspection.
 
+## Files to review
 
-\---
+| File | Purpose |
+|---|---|
+| [04_postgres_taxi.yml](04_postgres_taxi.yml) | PostgreSQL ingestion exercise |
+| [08_aws_taxi.yml](08_aws_taxi.yml) | AWS ingestion workflow |
+| [09_aws_taxi_scheduled.yml](09_aws_taxi_scheduled.yml) | Monthly S3 / Redshift workflow |
 
+## Configuration and validation
 
+Import the desired YAML into a compatible Kestra installation. Configure AWS access and the Redshift secret references used in the workflow in your own environment; review bucket names and resource settings before enabling schedules. These workflows use cloud services and can incur charges.
 
-\## Core Engineering Domains
+The scheduled green-taxi load issues one `COPY` and deduplicates identical source rows before `MERGE`. The yellow-taxi path uses a persistent staging table with explicit truncation so separate SQL tasks do not depend on a session-local temporary table. These corrections have not been executed against a live Redshift cluster during the portfolio review.
 
+No production deployment, current cloud availability, or end-to-end runtime success is claimed by the presence of these YAML files. A real replay should confirm stable target row counts and unique business keys before operational use.
 
-
-\- Data Orchestration
-
-\- ETL Pipeline Engineering
-
-\- Workflow Automation
-
-\- Cloud Data Engineering
-
-\- Pipeline Scheduling
-
-\- Analytics Engineering
-
-\- SQL Pipeline Automation
-
-\- Production-style Workflow Design
-
-
-
-\---
-
-
-
-\## Technologies
-
-
-
-\- Kestra
-
-\- YAML Pipelines
-
-\- Python
-
-\- PostgreSQL
-
-\- AWS
-
-\- SQL
-
-\- Workflow Orchestration
-
-\- ETL Automation
-
-
-
-\---
-
-
-
-\## Repository Structure
-
-
-
-```text
-
-modern-data-orchestration-pipelines/
-
-│
-
-├── 01\_hello\_world.yml
-
-├── 02\_python.yml
-
-├── 03\_getting\_started\_data\_pipeline.yml
-
-├── 04\_postgres\_taxi.yml
-
-├── 08\_aws\_taxi.yml
-
-├── 09\_aws\_taxi\_scheduled.yml
-
-├── etl\_pipeline\_1.yml
-
-├── README.md
-
-└── .gitignore
-
-```
-
-
-
-\---
-
-
-
-\## Key Engineering Features
-
-
-
-\- Scheduled pipeline orchestration
-
-\- AWS-integrated workflow automation
-
-\- PostgreSQL ETL workflows
-
-\- YAML-driven orchestration design
-
-\- Automated ingestion pipelines
-
-\- Production-style analytics scheduling
-
-\- Cloud-native workflow structuring
-
-\- Modular ETL execution pipelines
-
-
-
-\---
-
-
-
-\## Objective
-
-
-
-This repository demonstrates production-style workflow orchestration and ETL automation using Kestra-style pipelines, cloud scheduling, PostgreSQL workflows, and YAML-driven automation.
-
-
-
-The project explores modern data engineering concepts including orchestration frameworks, scheduled execution, ETL automation, cloud workflows, and analytics pipeline design.
-
-
-
-\---
-
-
-
-\## Author
-
-
-
-Felix Brillant
-
-
-
-AI / Cloud Data Engineering
-
+Maintained by Felix Brillant.

@@ -107,18 +107,6 @@ tasks:
           FROM '{{ render(vars.s3_file) }}'
           IAM_ROLE '{{ secret("REDSHIFT_IAM_ROLE_ARN") }}'
           CSV
-          IGNOREHEADER 1; 
-
-          COPY stage_green_tripdata
-          FROM '{{ render(vars.s3_file) }}'
-          IAM_ROLE '{{ secret("REDSHIFT_IAM_ROLE_ARN") }}'
-          CSV
-          IGNOREHEADER 1;
-
-          COPY stage_green_tripdata
-          FROM '{{ render(vars.s3_file) }}'
-          IAM_ROLE '{{ secret("REDSHIFT_IAM_ROLE_ARN") }}'
-          CSV
           IGNOREHEADER 1;
 
       - id: redshift_green_merge
@@ -126,7 +114,7 @@ tasks:
         sql: |
           MERGE INTO green_tripdata AS t
           USING (
-              SELECT
+              SELECT DISTINCT
                   MD5(
                       COALESCE(CAST(vendorid AS VARCHAR), '') ||
                       COALESCE(CAST(lpep_pickup_datetime AS VARCHAR), '') ||
@@ -136,7 +124,7 @@ tasks:
                       COALESCE(CAST(fare_amount AS VARCHAR), '') ||
                       COALESCE(CAST(trip_distance AS VARCHAR), '')
                   ) AS unique_row_id,
-                  '{{ vars.file }}' AS filename,
+                  '{{ render(vars.file) }}' AS filename,
                   vendorid,
                   lpep_pickup_datetime,
                   lpep_dropoff_datetime,
@@ -243,7 +231,7 @@ tasks:
       - id: redshift_yellow_create_stage
         type: io.kestra.plugin.jdbc.redshift.Query
         sql: |
-          CREATE TEMP TABLE stage_yellow_tripdata (
+          CREATE TABLE IF NOT EXISTS stage_yellow_tripdata (
               vendorid INTEGER,
               tpep_pickup_datetime TIMESTAMP,
               tpep_dropoff_datetime TIMESTAMP,
@@ -264,11 +252,16 @@ tasks:
               congestion_surcharge DOUBLE PRECISION
           );
 
+      - id: redshift_yellow_truncate_stage
+        type: io.kestra.plugin.jdbc.redshift.Query
+        sql: |
+          TRUNCATE stage_yellow_tripdata;
+
       - id: redshift_yellow_copy
         type: io.kestra.plugin.jdbc.redshift.Query
         sql: |
           COPY stage_yellow_tripdata
-          FROM '{{ vars.s3_file }}'
+          FROM '{{ render(vars.s3_file) }}'
           IAM_ROLE '{{ secret("REDSHIFT_IAM_ROLE_ARN") }}'
           CSV
           IGNOREHEADER 1;
@@ -278,7 +271,7 @@ tasks:
         sql: |
           MERGE INTO yellow_tripdata AS t
           USING (
-              SELECT
+              SELECT DISTINCT
                   MD5(
                       COALESCE(CAST(vendorid AS VARCHAR), '') ||
                       COALESCE(CAST(tpep_pickup_datetime AS VARCHAR), '') ||
@@ -288,7 +281,7 @@ tasks:
                       COALESCE(CAST(fare_amount AS VARCHAR), '') ||
                       COALESCE(CAST(trip_distance AS VARCHAR), '')
                   ) AS unique_row_id,
-                  '{{ vars.file }}' AS filename,
+                  '{{ render(vars.file) }}' AS filename,
                   vendorid,
                   tpep_pickup_datetime,
                   tpep_dropoff_datetime,
