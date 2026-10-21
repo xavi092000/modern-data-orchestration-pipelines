@@ -4,7 +4,7 @@ Learning workflows covering Python tasks, PostgreSQL taxi ingestion, and schedul
 
 ## Origin and contribution scope
 
-The workflows use the `zoomcamp` namespace and reference DataTalksClub course data. They are **course-based exercises and adaptations**, not a claim of an original enterprise orchestration platform. See [Data Engineering Zoomcamp](https://github.com/DataTalksClub/data-engineering-zoomcamp).
+The workflows reference DataTalksClub course data. They are **course-based exercises and adaptations**, not a claim of an original enterprise orchestration platform. See [DataTalksClub](https://github.com/DataTalksClub).
 
 The public work includes AWS/Redshift workflow configuration, monthly schedules, staging tables, and SQL merge logic. The precise upstream-versus-personal line attribution has not been reconstructed; the published code is available for inspection.
 
